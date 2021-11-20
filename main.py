@@ -1,3 +1,4 @@
+import datetime
 import logging
 
 import aiogram.utils.markdown as md
@@ -10,133 +11,94 @@ from aiogram.types import ParseMode
 from aiogram.utils import executor
 
 from config import API_TOKEN
-
+from data import SECTIONS, EVENTS
+# Включаем логирование, будем видетьчто происходит в консоли
 logging.basicConfig(level=logging.INFO)
 
+# Базовый объект, управляющий соединением с Telegram API
 bot = Bot(token=API_TOKEN)
 
-# For example use simple MemoryStorage for Dispatcher.
+# Для примера храним данные в памяти.
+# Подключение долговременнного хранилища: TODO
 storage = MemoryStorage()
+
+# Наш менеджер запросов к боту
 dp = Dispatcher(bot, storage=storage)
 
 
-# States
-class Form(StatesGroup):
-    name = State()  # Will be represented in storage as 'Form:name'
-    age = State()  # Will be represented in storage as 'Form:age'
-    gender = State()  # Will be represented in storage as 'Form:gender'
+# Состояния для конечного автомата
+class Menu(StatesGroup):
+    section = State()  # Будем постоянно спрашивать секцию
 
 
 @dp.message_handler(commands='start')
 async def cmd_start(message: types.Message):
     """
-    Conversation's entry point
+    Начало беседы
     """
-    # Set state
-    await Form.name.set()
 
-    await message.reply(f"Hi there, {message.from_user.id}! What's your name?")
+    # Установим состояние
+    await Menu.section.set()
 
+    # создаем клавиатуру
+    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
+    for section in SECTIONS:
+        markup.add(section)
 
-# You can use state '*' if you need to handle all states
+    await message.reply(f"Привет, {message.from_user.username}! "
+                        f"\nЯ помогу тебе сориентироваться в расписании фестиваля!"
+                        f"\nНа какую секцию хотелось бы попасть?", reply_markup=markup)
+
+# Пометка состояния '*' поможет обработать любое сосотояние бота
 @dp.message_handler(state='*', commands='cancel')
-@dp.message_handler(Text(equals='cancel', ignore_case=True), state='*')
+@dp.message_handler(state='*', regexp=r'(.*(с|С)пасибо.*|.*(о|О)тмена.*)')
 async def cancel_handler(message: types.Message, state: FSMContext):
     """
-    Allow user to cancel any action
+    Разрешаем пользователю закончить общение в любой момент
     """
     current_state = await state.get_state()
     if current_state is None:
         return
 
     logging.info('Cancelling state %r', current_state)
-    # Cancel state and inform user about it
+    # Завершаем работу автомата
     await state.finish()
-    # And remove keyboard (just in case)
-    await message.reply('Cancelled.', reply_markup=types.ReplyKeyboardRemove())
+
+    # Сообщаем пользователю и удаляем клавиатуру
+    await message.reply('Спасибо за использование!', reply_markup=types.ReplyKeyboardRemove())
+
+@dp.message_handler(
+    lambda message: message.text not in SECTIONS,
+    state=Menu.section)
+async def process_section_invalid(message: types.Message):
+    """
+    Можно выбирать только заданные секции
+    """
+    return await message.reply("У нас нет такой секции. Пожалуйста, выберите из списка.")
 
 
-@dp.message_handler(state=Form.name)
-async def process_name(message: types.Message, state: FSMContext):
-    """
-    Process user name
-    """
+@dp.message_handler(state=Menu.section)
+async def process_section(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
-        data['name'] = message.text
+        data['section'] = message.text
 
-    await Form.next()
-    await message.reply("How old are you?")
+    s_events = sorted(filter(lambda ev: ev[2] == message.text, EVENTS))
+    now = datetime.datetime.now().time()
+    event = next(filter(lambda ev: ev[0].hour == now.hour, s_events))[1]
 
-
-# Check age. Age gotta be digit
-@dp.message_handler(
-    lambda message: not message.text.isdigit(),
-    state=Form.age)
-async def process_age_invalid(message: types.Message):
-    """
-    If age is invalid
-    """
-    return await message.reply("Age gotta be a number.\nHow old are you? (digits only)")
-
-
-@dp.message_handler(
-    lambda message: message.text.isdigit(),
-    state=Form.age)
-async def process_age(message: types.Message, state: FSMContext):
-    # Update state and data
-    await Form.next()
-    await state.update_data(age=int(message.text))
-
-    # Configure ReplyKeyboardMarkup
-    markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
-    markup.add("Male", "Female")
-    markup.add("Other")
-
-    await message.reply("What is your gender?", reply_markup=markup)
-
-
-@dp.message_handler(
-    lambda message: message.text not in ["Male", "Female", "Other"],
-    state=Form.gender)
-async def process_gender_invalid(message: types.Message):
-    """
-    In this example gender has to be one of: Male, Female, Other.
-    """
-    return await message.reply("Bad gender name. Choose your gender from the keyboard.")
-
-
-@dp.message_handler(state=Form.gender)
-async def process_gender(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['gender'] = message.text
-
-        # Remove keyboard
-        markup = types.ReplyKeyboardRemove()
-
-        # And send message
-        await bot.send_message(
-            message.chat.id,
-            md.text(
-                md.text('Hi! Nice to meet you,', md.bold(data['name'])),
-                md.text('Age:', md.code(data['age'])),
-                md.text('Gender:', data['gender']),
-                sep='\n',
-            ),
-            reply_markup=markup,
-            parse_mode=ParseMode.MARKDOWN,
-        )
-
-    # Finish conversation
-    await state.finish()
+    message_text = md.text('Отлично! Сейчас идёт:',
+                           md.italic(event))
+    await message.reply(message_text, parse_mode=ParseMode.MARKDOWN)
 
 
 @dp.message_handler(state='*', content_types=['document', 'photo', 'sticker'])
 async def unknown_message(message: types.Message):
-    message_text = md.text('Я не знаю, что с этим делать',
-                           md.italic('\nЯ просто напомню,'), 'что есть',
-                           md.code('команда'), '/help')
+    message_text = md.text('Я не знаю, что с этим делать!')
     await message.reply(message_text, parse_mode=ParseMode.MARKDOWN)
 
 
 if __name__ == '__main__':
-    executor.start_polling(dp, skip_updates=True)
+    try:
+        executor.start_polling(dp, skip_updates=True)
+    except (KeyboardInterrupt, SystemExit):
+        logging.error("Bot stopped!")
