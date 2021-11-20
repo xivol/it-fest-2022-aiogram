@@ -12,6 +12,7 @@ from aiogram.utils import executor
 
 from config import API_TOKEN
 from data import SECTIONS, EVENTS
+
 # Включаем логирование, будем видетьчто происходит в консоли
 logging.basicConfig(level=logging.INFO)
 
@@ -45,7 +46,7 @@ async def cmd_start(message: types.Message):
     for section in SECTIONS:
         markup.add(section)
 
-    await message.reply(f"Привет, {message.from_user.username}! "
+    await message.answer(f"Привет, {message.from_user.full_name}! "
                         f"\nЯ помогу тебе сориентироваться в расписании фестиваля!"
                         f"\nНа какую секцию хотелось бы попасть?", reply_markup=markup)
 
@@ -65,7 +66,7 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     await state.finish()
 
     # Сообщаем пользователю и удаляем клавиатуру
-    await message.reply('Спасибо за использование!', reply_markup=types.ReplyKeyboardRemove())
+    await message.answer('Спасибо за использование!', reply_markup=types.ReplyKeyboardRemove())
 
 @dp.message_handler(
     lambda message: message.text not in SECTIONS,
@@ -84,10 +85,14 @@ async def process_section(message: types.Message, state: FSMContext):
 
     s_events = sorted(filter(lambda ev: ev[2] == message.text, EVENTS))
     now = datetime.datetime.now().time()
-    event = next(filter(lambda ev: ev[0].hour == now.hour, s_events))[1]
+    event = list(filter(lambda ev: ev[0].hour == now.hour and now.minute >= ev[0].minute, s_events))
 
-    message_text = md.text('Отлично! Сейчас идёт:',
-                           md.italic(event))
+    if len(event) > 0:
+        message_text = md.text('Отлично! Сейчас идёт:',
+                               md.italic(event[0][1]))
+    else:
+        message_text = md.text('Кажется, эта секция закончилась!')
+
     await message.reply(message_text, parse_mode=ParseMode.MARKDOWN)
 
 
