@@ -74,20 +74,17 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     state=Menu.section)
 async def process_section_invalid(message: types.Message):
     """
-    Можно выбирать только заданные секции
+    Можно выбирать только заданные мероприятия
     """
-    return await message.reply("У нас нет такой секции. Пожалуйста, выберите из списка.")
+    return await message.reply("У нас нет такого мероприятия. Пожалуйста, выберите из списка.")
 
 
 @dp.message_handler(state=Menu.section)
 async def process_section(message: types.Message, state: FSMContext):
-    async with state.proxy() as data:
-        data['section'] = message.text
 
     reply_text = SECTIONS[message.text]
 
     if message.text == SCHEDULE:
-        s_events = sorted(EVENTS)
         now = datetime.datetime.now().time()
         event = list(filter(lambda ev: ev[0].hour == now.hour and now.minute >= ev[0].minute, EVENTS))
 
