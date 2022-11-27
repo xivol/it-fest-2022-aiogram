@@ -11,7 +11,7 @@ from aiogram.types import ParseMode
 from aiogram.utils import executor
 
 from config import API_TOKEN
-from data import SECTIONS, EVENTS
+from data import SECTIONS, EVENTS, SCHEDULE
 
 # Включаем логирование, будем видетьчто происходит в консоли
 logging.basicConfig(level=logging.INFO)
@@ -38,17 +38,17 @@ async def cmd_start(message: types.Message):
     Начало беседы
     """
 
-    # Установим состояние
+    # Установим состояние section
     await Menu.section.set()
-
     # создаем клавиатуру
     markup = types.ReplyKeyboardMarkup(resize_keyboard=True, selective=True)
     for section in SECTIONS:
         markup.add(section)
 
     await message.answer(f"Привет, {message.from_user.full_name}! "
-                        f"\nЯ помогу тебе сориентироваться в расписании фестиваля!"
-                        f"\nНа какую секцию хотелось бы попасть?", reply_markup=markup)
+                         f"\nЯ помогу тебе сориентироваться в расписании фестиваля!"
+                         f"\nНа какое мероприятие хотелось бы попасть?", reply_markup=markup)
+
 
 # Пометка состояния '*' поможет обработать любое сосотояние бота
 @dp.message_handler(state='*', commands='cancel')
@@ -68,6 +68,7 @@ async def cancel_handler(message: types.Message, state: FSMContext):
     # Сообщаем пользователю и удаляем клавиатуру
     await message.answer('Спасибо за использование!', reply_markup=types.ReplyKeyboardRemove())
 
+
 @dp.message_handler(
     lambda message: message.text not in SECTIONS,
     state=Menu.section)
@@ -83,17 +84,22 @@ async def process_section(message: types.Message, state: FSMContext):
     async with state.proxy() as data:
         data['section'] = message.text
 
-    s_events = sorted(filter(lambda ev: ev[2] == message.text, EVENTS))
-    now = datetime.datetime.now().time()
-    event = list(filter(lambda ev: ev[0].hour == now.hour and now.minute >= ev[0].minute, s_events))
+    reply_text = SECTIONS[message.text]
 
-    if len(event) > 0:
-        message_text = md.text('Отлично! Сейчас идёт:',
-                               md.italic(event[0][1]))
+    if message.text == SCHEDULE:
+        s_events = sorted(EVENTS)
+        now = datetime.datetime.now().time()
+        event = list(filter(lambda ev: ev[0].hour == now.hour and now.minute >= ev[0].minute, EVENTS))
+
+        if len(event) > 0:
+            reply_text = md.text('Отлично! Сейчас идёт:',
+                                   md.italic(event[0][1]))
+        else:
+            reply_text = md.text('Кажется, фестиваль уже закончился!')
     else:
-        message_text = md.text('Кажется, эта секция закончилась!')
+        reply_text = SECTIONS[message.text]
 
-    await message.reply(message_text, parse_mode=ParseMode.MARKDOWN)
+    await message.reply(reply_text, parse_mode=ParseMode.MARKDOWN)
 
 
 @dp.message_handler(state='*', content_types=['document', 'photo', 'sticker'])
@@ -105,5 +111,5 @@ async def unknown_message(message: types.Message):
 if __name__ == '__main__':
     try:
         executor.start_polling(dp, skip_updates=True)
-    except (KeyboardInterrupt, SystemExit):
-        logging.error("Bot stopped!")
+    except Exception as e:
+        logging.error("Bot stopped! " + str(e))
